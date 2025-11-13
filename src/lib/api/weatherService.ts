@@ -133,12 +133,8 @@ export async function getCachedWeather(
 }
 
 // Legacy adapter for backward compatibility with old WeatherData type
-export async function fetchWeatherForecast(location: string): Promise<any[]> {
-  // Default to Paris coordinates
-  const lat = 48.8566;
-  const lon = 2.3522;
-  
-  const forecasts = await getCachedWeather(lat, lon, 7);
+export async function fetchWeatherForecast(latitude: number, longitude: number): Promise<any[]> {
+  const forecasts = await getCachedWeather(latitude, longitude, 7);
   
   // Map to old format
   return forecasts.map(f => ({

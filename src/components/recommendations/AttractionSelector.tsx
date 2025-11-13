@@ -25,8 +25,8 @@ export const AttractionSelector = ({ attractions, onSelect, selectedId }: Attrac
         >
           <CardHeader>
             <div className="flex items-start justify-between mb-2">
-              <Badge variant={attraction.weatherDependent ? 'default' : 'secondary'}>
-                {attraction.type}
+              <Badge variant="secondary">
+                {attraction.category.replace('_', ' ')}
               </Badge>
               {selectedId === attraction.id && (
                 <Badge className="bg-gradient-primary">Selected</Badge>
@@ -35,23 +35,16 @@ export const AttractionSelector = ({ attractions, onSelect, selectedId }: Attrac
             <CardTitle className="text-lg">{attraction.name}</CardTitle>
             <CardDescription className="flex items-center gap-1 text-sm">
               <MapPin className="w-3 h-3" />
-              {attraction.location}
+              {attraction.location.city}
             </CardDescription>
           </CardHeader>
           <CardContent>
             <p className="text-sm text-muted-foreground line-clamp-2">
               {attraction.description}
             </p>
-            <div className="mt-3 flex items-center gap-2">
-              <div className="flex-1 bg-muted rounded-full h-2 overflow-hidden">
-                <div
-                  className="h-full bg-gradient-primary transition-all"
-                  style={{ width: `${attraction.averageCrowd}%` }}
-                />
-              </div>
-              <span className="text-xs text-muted-foreground">
-                {attraction.averageCrowd}% avg
-              </span>
+            <div className="mt-3 flex items-center justify-between text-xs text-muted-foreground">
+              <span>⭐ {attraction.rating} ({attraction.totalReviews.toLocaleString()})</span>
+              <span>Capacity: {attraction.capacity.toLocaleString()}</span>
             </div>
           </CardContent>
         </Card>

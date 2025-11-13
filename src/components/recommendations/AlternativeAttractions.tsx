@@ -28,7 +28,7 @@ export const AlternativeAttractions = ({ alternatives, onSelect }: AlternativeAt
           >
             <CardHeader>
               <div className="flex items-start justify-between mb-2">
-                <Badge variant="secondary">{attraction.type}</Badge>
+                <Badge variant="secondary">{attraction.category.replace('_', ' ')}</Badge>
                 <div className="text-right">
                   <div className="text-lg font-bold text-accent">
                     {attraction.similarityScore}%
@@ -39,7 +39,7 @@ export const AlternativeAttractions = ({ alternatives, onSelect }: AlternativeAt
               <CardTitle className="text-lg">{attraction.name}</CardTitle>
               <CardDescription className="flex items-center gap-1 text-sm">
                 <MapPin className="w-3 h-3" />
-                {attraction.location}
+                {attraction.location.city}
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">

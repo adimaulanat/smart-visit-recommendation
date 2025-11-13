@@ -24,7 +24,7 @@ const RecommendationsPage = () => {
     try {
       // Fetch data in parallel
       const [weatherData, crowdData] = await Promise.all([
-        fetchWeatherForecast(attraction.location),
+        fetchWeatherForecast(attraction.location.latitude, attraction.location.longitude),
         Promise.resolve(generateCrowdPredictions(attraction.id)),
       ]);
 

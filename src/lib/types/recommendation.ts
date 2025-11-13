@@ -2,11 +2,21 @@ export interface Attraction {
   id: string;
   name: string;
   description: string;
-  type: 'museum' | 'park' | 'landmark' | 'entertainment' | 'historical';
-  location: string;
-  image: string;
-  averageCrowd: number;
-  weatherDependent: boolean;
+  category: 'theme_park' | 'museum' | 'nature' | 'entertainment' | 'cultural' | 'aquarium';
+  location: {
+    city: string;
+    country: string;
+    latitude: number;
+    longitude: number;
+  };
+  imageUrl: string;
+  basePrice: number;
+  currency: string;
+  tags: string[];
+  rating: number;
+  totalReviews: number;
+  capacity: number;
+  openHours: Record<string, string>;
 }
 
 export interface WeatherData {
