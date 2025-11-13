@@ -1,3 +1,5 @@
+import { supabase } from '@/integrations/supabase/client';
+
 interface WeatherForecast {
   date: string;
   temperature: number;
@@ -15,58 +17,28 @@ export async function getWeatherForecast(
   longitude: number,
   days: number = 14
 ): Promise<WeatherForecast[]> {
-  // IMPORTANT: Use import.meta.env for Vite
-  const apiKey = import.meta.env.VITE_OPENWEATHER_API_KEY;
-  
-  if (!apiKey) {
-    console.warn('OpenWeather API key not found, using mock data');
-    return generateMockWeatherData(days);
-  }
-
   try {
-    const response = await fetch(
-      `https://api.openweathermap.org/data/2.5/forecast?lat=${latitude}&lon=${longitude}&appid=${apiKey}&units=metric&cnt=${days * 8}`
-    );
+    console.log(`☁️ Fetching weather via edge function...`);
+    
+    const { data, error } = await supabase.functions.invoke('weather-forecast', {
+      body: { latitude, longitude, days }
+    });
 
-    if (!response.ok) {
-      throw new Error('Weather API request failed');
+    if (error) {
+      console.error('Weather edge function error:', error);
+      throw new Error('Weather fetch failed');
     }
 
-    const data = await response.json();
+    if (!data || !Array.isArray(data)) {
+      throw new Error('Invalid weather data');
+    }
 
-    // Group by date
-    const forecastMap = new Map<string, any[]>();
-    data.list.forEach((item: any) => {
-      const date = item.dt_txt.split(' ')[0];
-      if (!forecastMap.has(date)) {
-        forecastMap.set(date, []);
-      }
-      forecastMap.get(date)!.push(item);
-    });
+    console.log(`✅ Weather data received: ${data.length} days`);
+    return data;
 
-    // Calculate daily averages
-    const forecast: WeatherForecast[] = [];
-    forecastMap.forEach((items, date) => {
-      const avgTemp = items.reduce((sum, item) => sum + item.main.temp, 0) / items.length;
-      const avgFeelsLike = items.reduce((sum, item) => sum + item.main.feels_like, 0) / items.length;
-      const maxPrecipitation = Math.max(...items.map(item => item.pop * 100));
-
-      forecast.push({
-        date,
-        temperature: Math.round(avgTemp),
-        feelsLike: Math.round(avgFeelsLike),
-        condition: items[0].weather[0].main.toLowerCase(),
-        conditionCode: items[0].weather[0].description,
-        precipitation: Math.round(maxPrecipitation),
-        humidity: Math.round(items.reduce((sum: number, item: any) => sum + item.main.humidity, 0) / items.length),
-        windSpeed: Math.round(items.reduce((sum: number, item: any) => sum + item.wind.speed, 0) / items.length * 3.6),
-        uvIndex: 5
-      });
-    });
-
-    return forecast.slice(0, days);
   } catch (error) {
-    console.error('Weather API error:', error);
+    console.error('Weather service error:', error);
+    console.warn('Falling back to mock data');
     return generateMockWeatherData(days);
   }
 }
