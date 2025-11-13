@@ -1,4 +1,4 @@
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import { supabase } from '@/integrations/supabase/client';
 
 interface GeminiRecommendationInput {
   attraction: any;
@@ -13,125 +13,30 @@ interface GeminiRecommendationInput {
   };
 }
 
-// IMPORTANT: Vite uses import.meta.env instead of process.env
-function getGeminiAPI() {
-  const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
-  
-  if (!apiKey) {
-    throw new Error('VITE_GEMINI_API_KEY not found. Please add it to .env.local');
-  }
-
-  return new GoogleGenerativeAI(apiKey);
-}
-
 export async function getAIRecommendations(
   input: GeminiRecommendationInput
 ): Promise<any> {
-  const genAI = getGeminiAPI();
-  
-  // Use Gemini 1.5 Flash for speed (or gemini-1.5-pro for better quality)
-  const model = genAI.getGenerativeModel({ 
-    model: "gemini-1.5-flash",
-    generationConfig: {
-      temperature: 0.7,
-      topK: 40,
-      topP: 0.95,
-      maxOutputTokens: 4096,
-    }
-  });
-
-  const prompt = buildPrompt(input);
-
   try {
-    const result = await model.generateContent(prompt);
-    const response = await result.response;
-    const text = response.text();
-
-    // Extract JSON from response
-    let jsonText = text;
+    console.log('🤖 Calling Gemini edge function...');
     
-    // Remove markdown code blocks if present
-    const codeBlockMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/);
-    if (codeBlockMatch) {
-      jsonText = codeBlockMatch[1];
+    const { data, error } = await supabase.functions.invoke('gemini-recommendations', {
+      body: { input }
+    });
+
+    if (error) {
+      console.error('Edge function error:', error);
+      throw new Error(`AI recommendations failed: ${error.message}`);
     }
 
-    // Find JSON object
-    const jsonMatch = jsonText.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) {
-      console.error('Raw Gemini response:', text);
-      throw new Error('No valid JSON in Gemini response');
-    }
+    console.log('✅ Recommendations received');
+    return data;
 
-    const recommendations = JSON.parse(jsonMatch[0]);
-    return recommendations;
   } catch (error: any) {
-    console.error('Gemini API error:', error);
-    
-    if (error.message?.includes('API_KEY_INVALID')) {
-      throw new Error('Invalid Gemini API key. Check your .env.local file');
-    }
-    if (error.message?.includes('QUOTA_EXCEEDED')) {
-      throw new Error('Gemini API quota exceeded. Try again later or upgrade');
-    }
-    
+    console.error('Gemini service error:', error);
     throw new Error(`AI recommendations failed: ${error.message}`);
   }
 }
 
-function buildPrompt(input: GeminiRecommendationInput): string {
-  const currentDate = new Date().toISOString().split('T')[0];
-  
-  return `You are an AI travel recommendation assistant. Analyze the data and provide recommendations in JSON format.
-
-CONTEXT:
-- Attraction: ${input.attraction.name}
-- Category: ${input.attraction.category}
-- Location: ${input.attraction.location.city}
-- Capacity: ${input.attraction.capacity}
-- Base Price: $${input.attraction.basePrice}
-- Selected Date: ${input.selectedDate || 'Not specified - recommend best dates'}
-- Current Date: ${currentDate}
-
-USER PREFERENCES:
-- Budget: ${input.preferences.budgetRange}
-- Group Size: ${input.preferences.groupSize}
-- Interests: ${input.preferences.interests.join(', ')}
-- Avoid Crowds: ${input.preferences.avoidCrowds}
-
-WEATHER DATA (next 14 days):
-${JSON.stringify(input.weatherData.slice(0, 14), null, 2)}
-
-CROWD PREDICTIONS (next 14 days):
-${JSON.stringify(input.crowdData.slice(0, 14), null, 2)}
-
-SCORING:
-1. Weather (40 pts): 20-28°C, sunny = best
-2. Crowd (35 pts): <40% capacity = best
-3. Price (15 pts): Higher discounts = better
-4. Events (10 pts): Special events = bonus
-
-OUTPUT (JSON only):
-{
-  "recommendedDates": [
-    {
-      "date": "2025-11-20",
-      "dayOfWeek": "Thursday",
-      "score": 92,
-      "scoreBreakdown": {"weather": 38, "crowd": 32, "price": 14, "events": 8},
-      "weather": {"temperature": 24, "condition": "sunny", "precipitation": 5},
-      "crowd": {"level": "low", "score": 25, "expectedVisitors": 8500, "capacityPercentage": 42},
-      "pricing": {"basePrice": ${input.attraction.basePrice || 50}, "dynamicPrice": ${(input.attraction.basePrice || 50) * 0.9}, "discount": ${(input.attraction.basePrice || 50) * 0.1}, "reason": "Weekday discount"},
-      "reasons": ["Perfect weather", "Low crowds", "Discount available"],
-      "badges": ["best-weather", "best-value"]
-    }
-  ],
-  "insights": [
-    {"type": "tip", "title": "Best Time", "message": "Arrive early to avoid crowds", "confidence": "high", "icon": "lightbulb"}
-  ],
-  "confidence": 0.92
-}`;
-}
 
 // Cache in localStorage
 const CACHE_KEY = 'gemini_recommendations';
@@ -170,19 +75,33 @@ export async function getCachedRecommendations(
   return recommendations;
 }
 
-// Test connection
+// Test connection to edge function
 export async function testGeminiConnection(): Promise<boolean> {
   try {
-    const genAI = getGeminiAPI();
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+    const mockInput = {
+      attraction: {
+        id: 'test',
+        name: 'Test Attraction',
+        category: 'theme_park',
+        location: { city: 'Jakarta' },
+        capacity: 10000,
+        basePrice: 100000
+      },
+      weatherData: [],
+      crowdData: [],
+      preferences: {
+        budgetRange: 'medium' as const,
+        groupSize: 2,
+        interests: [],
+        avoidCrowds: false
+      }
+    };
     
-    const result = await model.generateContent("Say hello in JSON: {\"message\": \"...\"}");
-    const response = await result.response;
-    
-    console.log('✅ Gemini connected:', response.text());
+    const result = await getAIRecommendations(mockInput);
+    console.log('✅ Gemini edge function connected');
     return true;
   } catch (error: any) {
-    console.error('❌ Gemini test failed:', error.message);
+    console.error('❌ Gemini edge function test failed:', error.message);
     return false;
   }
 }
