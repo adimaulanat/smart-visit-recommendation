@@ -1,95 +1,153 @@
 import { useState } from 'react';
-import { AttractionSelector } from '@/components/recommendations/AttractionSelector';
-import { DateRecommendation } from '@/components/recommendations/DateRecommendation';
-import { AlternativeAttractions } from '@/components/recommendations/AlternativeAttractions';
-import { Attraction, DateRecommendation as DateRec, AlternativeAttraction } from '@/lib/types/recommendation';
-import { attractions } from '@/lib/data/attractions';
+import { Attraction } from '@/lib/data/attractions';
 import { generateCrowdPredictions } from '@/lib/data/crowdPredictions';
-import { fetchWeatherForecast } from '@/lib/api/weatherService';
-import { generateDateRecommendations, generateAlternatives } from '@/lib/api/geminiService';
-import { Button } from '@/components/ui/button';
-import { ArrowLeft } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { getCachedWeather } from '@/lib/api/weatherService';
+import { getCachedRecommendations } from '@/lib/api/geminiService';
+import AttractionSelector from '@/components/recommendations/AttractionSelector';
+import DateRecommendation from '@/components/recommendations/DateRecommendation';
+import AlternativeAttractions from '@/components/recommendations/AlternativeAttractions';
+import InsightCard from '@/components/recommendations/InsightCard';
 
-const RecommendationsPage = () => {
+export default function RecommendationsPage() {
   const [selectedAttraction, setSelectedAttraction] = useState<Attraction | null>(null);
-  const [recommendations, setRecommendations] = useState<DateRec[]>([]);
-  const [alternatives, setAlternatives] = useState<AlternativeAttraction[]>([]);
+  const [recommendations, setRecommendations] = useState<any>(null);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const handleAttractionSelect = async (attraction: Attraction) => {
     setSelectedAttraction(attraction);
     setLoading(true);
+    setError(null);
 
     try {
-      // Fetch data in parallel
-      const [weatherData, crowdData] = await Promise.all([
-        fetchWeatherForecast(attraction.location.latitude, attraction.location.longitude),
-        Promise.resolve(generateCrowdPredictions(attraction.id)),
-      ]);
+      // Fetch weather
+      const weatherData = await getCachedWeather(
+        attraction.location.latitude,
+        attraction.location.longitude,
+        14
+      );
 
-      // Generate recommendations and alternatives
-      const [recs, alts] = await Promise.all([
-        generateDateRecommendations(attraction, weatherData, crowdData),
-        generateAlternatives(attraction, attractions),
-      ]);
+      // Generate crowd predictions
+      const crowdData = generateCrowdPredictions(
+        attraction.id,
+        attraction.capacity,
+        14
+      );
 
-      setRecommendations(recs);
-      setAlternatives(alts);
-    } catch (error) {
-      console.error('Error loading recommendations:', error);
+      // Get AI recommendations
+      const result = await getCachedRecommendations({
+        attraction,
+        weatherData,
+        crowdData,
+        preferences: {
+          budgetRange: 'medium',
+          groupSize: 2,
+          interests: attraction.tags,
+          avoidCrowds: true
+        }
+      });
+
+      setRecommendations(result);
+    } catch (err: any) {
+      setError(err.message || 'Failed to get recommendations');
+      console.error('Error:', err);
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-background to-muted py-8">
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-purple-50 py-12">
       <div className="container mx-auto px-4">
-        <div className="mb-8">
-          <Link to="/">
-            <Button variant="ghost" size="sm">
-              <ArrowLeft className="w-4 h-4 mr-2" />
-              Back to Home
-            </Button>
-          </Link>
+        {/* Hero */}
+        <div className="text-center mb-12">
+          <h1 className="text-5xl font-bold mb-4 bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
+            Find Your Perfect Visit Time
+          </h1>
+          <p className="text-xl text-gray-600">
+            AI-powered recommendations for the best experience
+          </p>
         </div>
 
-        <div className="max-w-6xl mx-auto">
-          <div className="text-center mb-12 animate-fade-in">
-            <h1 className="text-4xl md:text-5xl font-bold mb-4 bg-gradient-primary bg-clip-text text-transparent">
-              Find Your Perfect Visit Day
-            </h1>
-            <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
-              Select an attraction to get AI-powered recommendations based on weather and crowd predictions
-            </p>
+        {/* Main Content */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+          {/* Left: Attraction Selector */}
+          <div className="lg:col-span-1">
+            <AttractionSelector
+              onSelect={handleAttractionSelect}
+              selected={selectedAttraction}
+            />
           </div>
 
-          <AttractionSelector
-            attractions={attractions}
-            onSelect={handleAttractionSelect}
-            selectedId={selectedAttraction?.id}
-          />
+          {/* Right: Results */}
+          <div className="lg:col-span-2">
+            {loading && <LoadingState />}
 
-          {selectedAttraction && (
-            <div className="mt-8 space-y-8">
-              <DateRecommendation
-                recommendations={recommendations}
-                loading={loading}
+            {error && (
+              <ErrorState
+                message={error}
+                onRetry={() => selectedAttraction && handleAttractionSelect(selectedAttraction)}
               />
-              
-              {alternatives.length > 0 && (
-                <AlternativeAttractions
-                  alternatives={alternatives}
-                  onSelect={handleAttractionSelect}
-                />
-              )}
-            </div>
-          )}
+            )}
+
+            {recommendations && !loading && (
+              <div className="space-y-6">
+                <DateRecommendation recommendations={recommendations} />
+
+                {recommendations.insights && recommendations.insights.length > 0 && (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {recommendations.insights.map((insight: any) => (
+                      <InsightCard key={insight.id} insight={insight} />
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {!selectedAttraction && !loading && !error && (
+              <EmptyState />
+            )}
+          </div>
         </div>
       </div>
     </div>
   );
-};
+}
 
-export default RecommendationsPage;
+// Loading Component
+function LoadingState() {
+  return (
+    <div className="space-y-4">
+      <div className="h-32 bg-gray-200 rounded-lg animate-pulse" />
+      <div className="h-64 bg-gray-200 rounded-lg animate-pulse" />
+    </div>
+  );
+}
+
+// Error Component
+function ErrorState({ message, onRetry }: { message: string; onRetry: () => void }) {
+  return (
+    <div className="bg-red-50 border border-red-200 rounded-lg p-6 text-center">
+      <p className="text-red-600 mb-4">{message}</p>
+      <button
+        onClick={onRetry}
+        className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700"
+      >
+        Try Again
+      </button>
+    </div>
+  );
+}
+
+// Empty State
+function EmptyState() {
+  return (
+    <div className="text-center py-16">
+      <div className="text-6xl mb-4">🎯</div>
+      <h2 className="text-2xl font-bold mb-2">Select an Attraction</h2>
+      <p className="text-gray-600">
+        Choose an attraction to get AI-powered date recommendations
+      </p>
+    </div>
+  );
+}
