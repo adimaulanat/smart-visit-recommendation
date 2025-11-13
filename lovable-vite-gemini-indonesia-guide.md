@@ -1118,6 +1118,8 @@ export const cities = [
 
 Also create src/lib/data/crowdPredictions.ts with Indonesian context:
 
+```
+
 export interface CrowdPrediction {
   date: string;
   level: 'low' | 'moderate' | 'high' | 'very-high';
