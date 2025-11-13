@@ -1,179 +1,256 @@
-import { Attraction, WeatherData, CrowdPrediction, DateRecommendation, AlternativeAttraction } from '../types/recommendation';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 
-const API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
-const API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent';
+interface GeminiRecommendationInput {
+  attraction: any;
+  weatherData: any[];
+  crowdData: any[];
+  selectedDate?: string;
+  preferences: {
+    budgetRange: 'low' | 'medium' | 'high';
+    groupSize: number;
+    interests: string[];
+    avoidCrowds: boolean;
+  };
+}
 
-export const generateDateRecommendations = async (
-  attraction: Attraction,
-  weatherData: WeatherData[],
-  crowdData: CrowdPrediction[]
-): Promise<DateRecommendation[]> => {
-  const prompt = `As a travel expert AI, analyze the best dates to visit ${attraction.name} in ${attraction.location}.
+// IMPORTANT: Vite uses import.meta.env instead of process.env
+function getGeminiAPI() {
+  const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+  
+  if (!apiKey) {
+    throw new Error('VITE_GEMINI_API_KEY not found. Please add it to .env.local');
+  }
 
-Attraction details:
-- Type: ${attraction.type}
-- Weather dependent: ${attraction.weatherDependent ? 'Yes' : 'No'}
-- Average crowd level: ${attraction.averageCrowd}%
+  return new GoogleGenerativeAI(apiKey);
+}
 
-Weather forecast for the next 7 days:
-${weatherData.map(w => `${w.date}: ${w.temp}°C, ${w.condition}, ${w.precipitation}% precipitation`).join('\n')}
+export async function getAIRecommendations(
+  input: GeminiRecommendationInput
+): Promise<any> {
+  const genAI = getGeminiAPI();
+  
+  // Use Gemini 1.5 Flash for speed (or gemini-1.5-pro for better quality)
+  const model = genAI.getGenerativeModel({ 
+    model: "gemini-1.5-flash",
+    generationConfig: {
+      temperature: 0.7,
+      topK: 40,
+      topP: 0.95,
+      maxOutputTokens: 4096,
+    }
+  });
 
-Crowd predictions:
-${crowdData.map(c => `${c.date}: ${c.crowdLevel} crowd (${c.predictedVisitors} visitors)`).join('\n')}
-
-For each date, provide:
-1. A score from 0-100 (100 being the best)
-2. A brief insight (max 50 words)
-3. 2-3 pros
-4. 1-2 cons
-
-Return ONLY a valid JSON array with this exact structure:
-[{
-  "date": "YYYY-MM-DD",
-  "score": 85,
-  "aiInsight": "Perfect day with...",
-  "pros": ["Low crowds", "Great weather"],
-  "cons": ["Slightly humid"]
-}]`;
+  const prompt = buildPrompt(input);
 
   try {
-    const response = await fetch(`${API_URL}?key=${API_KEY}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: {
-          temperature: 0.7,
-          maxOutputTokens: 2048,
-        },
-      }),
-    });
+    const result = await model.generateContent(prompt);
+    const response = await result.response;
+    const text = response.text();
 
-    if (!response.ok) {
-      throw new Error('Gemini API request failed');
-    }
-
-    const data = await response.json();
-    const text = data.candidates[0].content.parts[0].text;
-    
     // Extract JSON from response
-    const jsonMatch = text.match(/\[[\s\S]*\]/);
+    let jsonText = text;
+    
+    // Remove markdown code blocks if present
+    const codeBlockMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/);
+    if (codeBlockMatch) {
+      jsonText = codeBlockMatch[1];
+    }
+
+    // Find JSON object
+    const jsonMatch = jsonText.match(/\{[\s\S]*\}/);
     if (!jsonMatch) {
-      throw new Error('No valid JSON found in response');
+      console.error('Raw Gemini response:', text);
+      throw new Error('No valid JSON in Gemini response');
+    }
+
+    const recommendations = JSON.parse(jsonMatch[0]);
+    return recommendations;
+  } catch (error: any) {
+    console.error('Gemini API error:', error);
+    
+    if (error.message?.includes('API_KEY_INVALID')) {
+      throw new Error('Invalid Gemini API key. Check your .env.local file');
+    }
+    if (error.message?.includes('QUOTA_EXCEEDED')) {
+      throw new Error('Gemini API quota exceeded. Try again later or upgrade');
     }
     
-    const recommendations = JSON.parse(jsonMatch[0]);
+    throw new Error(`AI recommendations failed: ${error.message}`);
+  }
+}
+
+function buildPrompt(input: GeminiRecommendationInput): string {
+  const currentDate = new Date().toISOString().split('T')[0];
+  
+  return `You are an AI travel recommendation assistant. Analyze the data and provide recommendations in JSON format.
+
+CONTEXT:
+- Attraction: ${input.attraction.name}
+- Category: ${input.attraction.category}
+- Location: ${input.attraction.location.city}
+- Capacity: ${input.attraction.capacity}
+- Base Price: $${input.attraction.basePrice}
+- Selected Date: ${input.selectedDate || 'Not specified - recommend best dates'}
+- Current Date: ${currentDate}
+
+USER PREFERENCES:
+- Budget: ${input.preferences.budgetRange}
+- Group Size: ${input.preferences.groupSize}
+- Interests: ${input.preferences.interests.join(', ')}
+- Avoid Crowds: ${input.preferences.avoidCrowds}
+
+WEATHER DATA (next 14 days):
+${JSON.stringify(input.weatherData.slice(0, 14), null, 2)}
+
+CROWD PREDICTIONS (next 14 days):
+${JSON.stringify(input.crowdData.slice(0, 14), null, 2)}
+
+SCORING:
+1. Weather (40 pts): 20-28°C, sunny = best
+2. Crowd (35 pts): <40% capacity = best
+3. Price (15 pts): Higher discounts = better
+4. Events (10 pts): Special events = bonus
+
+OUTPUT (JSON only):
+{
+  "recommendedDates": [
+    {
+      "date": "2025-11-20",
+      "dayOfWeek": "Thursday",
+      "score": 92,
+      "scoreBreakdown": {"weather": 38, "crowd": 32, "price": 14, "events": 8},
+      "weather": {"temperature": 24, "condition": "sunny", "precipitation": 5},
+      "crowd": {"level": "low", "score": 25, "expectedVisitors": 8500, "capacityPercentage": 42},
+      "pricing": {"basePrice": ${input.attraction.basePrice || 50}, "dynamicPrice": ${(input.attraction.basePrice || 50) * 0.9}, "discount": ${(input.attraction.basePrice || 50) * 0.1}, "reason": "Weekday discount"},
+      "reasons": ["Perfect weather", "Low crowds", "Discount available"],
+      "badges": ["best-weather", "best-value"]
+    }
+  ],
+  "insights": [
+    {"type": "tip", "title": "Best Time", "message": "Arrive early to avoid crowds", "confidence": "high", "icon": "lightbulb"}
+  ],
+  "confidence": 0.92
+}`;
+}
+
+// Cache in localStorage
+const CACHE_KEY = 'gemini_recommendations';
+const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
+
+export async function getCachedRecommendations(
+  input: GeminiRecommendationInput
+): Promise<any> {
+  const cacheKey = `${CACHE_KEY}_${input.attraction.id}_${input.selectedDate || 'any'}`;
+  
+  try {
+    const cached = localStorage.getItem(cacheKey);
+    if (cached) {
+      const { data, timestamp } = JSON.parse(cached);
+      if (Date.now() - timestamp < CACHE_DURATION) {
+        console.log('✅ Using cached recommendations');
+        return data;
+      }
+    }
+  } catch (e) {
+    console.error('Cache read error:', e);
+  }
+  
+  console.log('🔄 Fetching fresh recommendations...');
+  const recommendations = await getAIRecommendations(input);
+  
+  try {
+    localStorage.setItem(cacheKey, JSON.stringify({
+      data: recommendations,
+      timestamp: Date.now()
+    }));
+  } catch (e) {
+    console.error('Cache write error:', e);
+  }
+  
+  return recommendations;
+}
+
+// Test connection
+export async function testGeminiConnection(): Promise<boolean> {
+  try {
+    const genAI = getGeminiAPI();
+    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
     
-    return recommendations.map((rec: any) => ({
-      ...rec,
-      weather: weatherData.find(w => w.date === rec.date)!,
-      crowdLevel: crowdData.find(c => c.date === rec.date)!,
+    const result = await model.generateContent("Say hello in JSON: {\"message\": \"...\"}");
+    const response = await result.response;
+    
+    console.log('✅ Gemini connected:', response.text());
+    return true;
+  } catch (error: any) {
+    console.error('❌ Gemini test failed:', error.message);
+    return false;
+  }
+}
+
+// Legacy adapter functions for backward compatibility
+export async function generateDateRecommendations(
+  attraction: any,
+  weatherData: any[],
+  crowdData: any[]
+): Promise<any[]> {
+  try {
+    // Adapt old structure to new API
+    const input = {
+      attraction: {
+        ...attraction,
+        category: attraction.type || 'attraction',
+        location: { city: attraction.location || 'Unknown' },
+        capacity: 20000,
+        basePrice: 50,
+      },
+      weatherData,
+      crowdData,
+      preferences: {
+        budgetRange: 'medium' as const,
+        groupSize: 2,
+        interests: [attraction.type || 'general'],
+        avoidCrowds: false,
+      },
+    };
+
+    const result = await getCachedRecommendations(input);
+    
+    // Map new structure back to old structure
+    return result.recommendedDates.map((rec: any) => ({
+      date: rec.date,
+      score: rec.score,
+      weather: rec.weather,
+      crowdLevel: rec.crowd,
+      aiInsight: rec.reasons.join('. '),
+      pros: rec.reasons,
+      cons: [],
     }));
   } catch (error) {
-    console.error('Error generating recommendations:', error);
-    return generateMockRecommendations(weatherData, crowdData);
-  }
-};
-
-export const generateAlternatives = async (
-  currentAttraction: Attraction,
-  allAttractions: Attraction[]
-): Promise<AlternativeAttraction[]> => {
-  const prompt = `Given that a user is interested in ${currentAttraction.name} (${currentAttraction.type}), suggest 3 alternative attractions from this list that they might also enjoy:
-
-${allAttractions.filter(a => a.id !== currentAttraction.id).map(a => `- ${a.name}: ${a.description} (${a.type})`).join('\n')}
-
-For each alternative, provide:
-1. A similarity score (0-100)
-2. A brief reason why they might like it (max 30 words)
-
-Return ONLY a valid JSON array:
-[{
-  "name": "Attraction Name",
-  "similarityScore": 85,
-  "reason": "Similar historical significance..."
-}]`;
-
-  try {
-    const response = await fetch(`${API_URL}?key=${API_KEY}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: {
-          temperature: 0.8,
-          maxOutputTokens: 1024,
-        },
-      }),
-    });
-
-    if (!response.ok) {
-      throw new Error('Gemini API request failed');
-    }
-
-    const data = await response.json();
-    const text = data.candidates[0].content.parts[0].text;
-    
-    const jsonMatch = text.match(/\[[\s\S]*\]/);
-    if (!jsonMatch) {
-      throw new Error('No valid JSON found in response');
-    }
-    
-    const alternatives = JSON.parse(jsonMatch[0]);
-    
-    return alternatives.map((alt: any) => {
-      const attraction = allAttractions.find(a => a.name === alt.name);
-      return attraction ? { ...attraction, ...alt } : null;
-    }).filter(Boolean);
-  } catch (error) {
-    console.error('Error generating alternatives:', error);
-    return generateMockAlternatives(currentAttraction, allAttractions);
-  }
-};
-
-const generateMockRecommendations = (
-  weatherData: WeatherData[],
-  crowdData: CrowdPrediction[]
-): DateRecommendation[] => {
-  return weatherData.map((weather) => {
-    const crowd = crowdData.find(c => c.date === weather.date)!;
-    const score = calculateMockScore(weather, crowd);
-    
-    return {
+    console.error('Error in generateDateRecommendations:', error);
+    // Return mock data as fallback
+    return weatherData.map((weather, i) => ({
       date: weather.date,
-      score,
+      score: 70 + Math.random() * 20,
       weather,
-      crowdLevel: crowd,
-      aiInsight: `${weather.condition === 'Clear' ? 'Beautiful' : 'Variable'} weather with ${crowd.crowdLevel} crowds expected.`,
-      pros: [
-        weather.condition === 'Clear' ? 'Perfect weather' : 'Manageable conditions',
-        crowd.crowdLevel === 'low' ? 'Few visitors' : 'Moderate crowds',
-      ],
-      cons: [weather.precipitation > 50 ? 'High chance of rain' : 'Typical weather'],
-    };
-  });
-};
+      crowdLevel: crowdData[i],
+      aiInsight: 'Good day to visit with favorable conditions.',
+      pros: ['Good weather', 'Moderate crowds'],
+      cons: [],
+    }));
+  }
+}
 
-const calculateMockScore = (weather: WeatherData, crowd: CrowdPrediction): number => {
-  let score = 50;
-  
-  if (weather.condition === 'Clear') score += 20;
-  if (weather.precipitation < 30) score += 15;
-  if (crowd.crowdLevel === 'low') score += 15;
-  
-  return Math.min(score, 100);
-};
-
-const generateMockAlternatives = (
-  current: Attraction,
-  all: Attraction[]
-): AlternativeAttraction[] => {
-  return all
-    .filter(a => a.id !== current.id && a.type === current.type)
+export async function generateAlternatives(
+  currentAttraction: any,
+  allAttractions: any[]
+): Promise<any[]> {
+  // Simple similarity matching as fallback
+  return allAttractions
+    .filter(a => a.id !== currentAttraction.id && a.type === currentAttraction.type)
     .slice(0, 3)
     .map(a => ({
       ...a,
-      similarityScore: Math.floor(Math.random() * 30) + 70,
-      reason: `Similar ${current.type} experience with unique characteristics`,
+      similarityScore: 70 + Math.random() * 25,
+      reason: `Similar ${currentAttraction.type} experience with unique appeal`,
     }));
-};
+}
