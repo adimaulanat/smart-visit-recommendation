@@ -2,69 +2,16 @@
 import { createClient } from '@supabase/supabase-js';
 import type { Database } from './types';
 
-/**
- * Supabase Configuration
- *
- * IMPORTANT: Environment variable configuration
- *
- * FOR LOCAL DEVELOPMENT (.env files):
- * - Create a .env.local file with:
- *   VITE_SUPABASE_URL=https://your-project.supabase.co
- *   VITE_SUPABASE_PUBLISHABLE_KEY=your-anon-key
- *
- * FOR LOVABLE DEPLOYMENT (Secrets UI):
- * 1. Go to your Lovable project settings
- * 2. Navigate to the Secrets section
- * 3. Add these secrets:
- *    - VITE_SUPABASE_URL
- *    - VITE_SUPABASE_PUBLISHABLE_KEY
- * 4. Rebuild/redeploy your app after adding secrets
- */
-
-// Get secrets from environment (works with both .env files and Lovable Secrets)
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
 const SUPABASE_PUBLISHABLE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
-
-// Debug logging (only in development)
-if (import.meta.env.DEV) {
-  console.log('Supabase Environment Check:', {
-    hasUrl: !!SUPABASE_URL,
-    hasKey: !!SUPABASE_PUBLISHABLE_KEY,
-    url: SUPABASE_URL ? `${SUPABASE_URL.substring(0, 30)}...` : 'undefined',
-    mode: import.meta.env.MODE
-  });
-}
-
-// Validate that secrets are loaded
-if (!SUPABASE_URL || SUPABASE_URL === 'undefined') {
-  console.error('Missing VITE_SUPABASE_URL environment variable');
-  throw new Error(
-    'Supabase URL is not configured. ' +
-    'For local dev: add VITE_SUPABASE_URL to .env.local. ' +
-    'For Lovable: configure in Secrets settings and redeploy.'
-  );
-}
-
-if (!SUPABASE_PUBLISHABLE_KEY || SUPABASE_PUBLISHABLE_KEY === 'undefined') {
-  console.error('Missing VITE_SUPABASE_PUBLISHABLE_KEY environment variable');
-  throw new Error(
-    'Supabase Publishable Key is not configured. ' +
-    'For local dev: add VITE_SUPABASE_PUBLISHABLE_KEY to .env.local. ' +
-    'For Lovable: configure in Secrets settings and redeploy.'
-  );
-}
 
 // Import the supabase client like this:
 // import { supabase } from "@/integrations/supabase/client";
 
-export const supabase = createClient<Database>(
-  SUPABASE_URL,
-  SUPABASE_PUBLISHABLE_KEY,
-  {
-    auth: {
-      storage: localStorage,
-      persistSession: true,
-      autoRefreshToken: true,
-    }
+export const supabase = createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
+  auth: {
+    storage: localStorage,
+    persistSession: true,
+    autoRefreshToken: true,
   }
-);
+});
