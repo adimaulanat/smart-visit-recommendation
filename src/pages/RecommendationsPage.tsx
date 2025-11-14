@@ -4,7 +4,7 @@ import { generateCrowdPredictions } from '@/lib/data/crowdPredictions';
 import { getCachedWeather } from '@/lib/api/weatherService';
 import { getCachedRecommendations } from '@/lib/api/geminiService';
 import AttractionSelector from '@/components/recommendations/AttractionSelector';
-import DateRecommendation from '@/components/recommendations/DateRecommendation';
+import GeminiRecommendations from '@/components/recommendations/GeminiRecommendations';
 import AlternativeAttractions from '@/components/recommendations/AlternativeAttractions';
 import InsightCard from '@/components/recommendations/InsightCard';
 
@@ -92,15 +92,7 @@ export default function RecommendationsPage() {
 
             {recommendations && !loading && (
               <div className="space-y-6">
-                <DateRecommendation recommendations={recommendations} />
-
-                {recommendations.insights && recommendations.insights.length > 0 && (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {recommendations.insights.map((insight: any) => (
-                      <InsightCard key={insight.id} insight={insight} />
-                    ))}
-                  </div>
-                )}
+                <GeminiRecommendations recommendations={recommendations} />
               </div>
             )}
 
