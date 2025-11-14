@@ -16,25 +16,54 @@ interface GeminiRecommendationInput {
 export async function getAIRecommendations(
   input: GeminiRecommendationInput
 ): Promise<any> {
-  try {
-    console.log('🤖 Calling Gemini edge function...');
-    
-    const { data, error } = await supabase.functions.invoke('gemini-recommendations', {
-      body: { input }
-    });
+  const maxRetries = 3;
+  const baseDelay = 2000; // 2 seconds
+  
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      console.log(`🤖 Calling Gemini edge function (attempt ${attempt}/${maxRetries})...`);
+      
+      const { data, error } = await supabase.functions.invoke('gemini-recommendations', {
+        body: { input }
+      });
 
-    if (error) {
-      console.error('Edge function error:', error);
-      throw new Error(`AI recommendations failed: ${error.message}`);
+      if (error) {
+        // Check if error is due to overload or unavailability
+        const errorMessage = error.message?.toLowerCase() || '';
+        const isOverloadError = errorMessage.includes('overload') || 
+                               errorMessage.includes('503') || 
+                               errorMessage.includes('unavailable');
+        
+        if (isOverloadError && attempt < maxRetries) {
+          const delay = baseDelay * Math.pow(2, attempt - 1); // Exponential backoff
+          console.log(`⏳ Service overloaded, retrying in ${delay}ms...`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+          continue;
+        }
+        
+        console.error('Edge function error:', error);
+        throw new Error(`AI recommendations failed: ${error.message}`);
+      }
+
+      console.log('✅ Recommendations received');
+      return data;
+
+    } catch (error: any) {
+      console.error(`Attempt ${attempt} failed:`, error);
+      
+      // If this is the last attempt, throw the error
+      if (attempt === maxRetries) {
+        throw new Error(`AI recommendations failed after ${maxRetries} attempts: ${error.message}`);
+      }
+      
+      // Otherwise, wait and retry
+      const delay = baseDelay * Math.pow(2, attempt - 1);
+      console.log(`⏳ Retrying in ${delay}ms...`);
+      await new Promise(resolve => setTimeout(resolve, delay));
     }
-
-    console.log('✅ Recommendations received');
-    return data;
-
-  } catch (error: any) {
-    console.error('Gemini service error:', error);
-    throw new Error(`AI recommendations failed: ${error.message}`);
   }
+  
+  throw new Error('Failed to get AI recommendations after all retries');
 }
 
 

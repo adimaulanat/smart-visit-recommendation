@@ -30,41 +30,86 @@ serve(async (req) => {
     // Build the prompt
     const prompt = buildPrompt(input);
 
-    // Call Gemini API
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          contents: [
-            {
-              parts: [{ text: prompt }],
-            },
-          ],
-          generationConfig: {
-            temperature: 0.7,
-            topK: 40,
-            topP: 0.95,
-            maxOutputTokens: 8192,
-            responseModalities: ["TEXT"],
-          },
-          systemInstruction: {
-            parts: [{ text: "Respond directly without extended reasoning. Analyze data and return JSON immediately." }]
-          }
-        }),
-      }
-    );
+    // Define fallback models in order of preference
+    const models = [
+      "gemini-2.5-flash",
+      "gemini-2.0-flash-lite",
+      "gemini-2.0-flash",
+      "gemini-2.5-pro"
+    ];
 
-    if (!response.ok) {
-      const errorData = await response.text();
-      console.error("Gemini API error:", errorData);
-      throw new Error(`Gemini API failed: ${response.status}`);
+    let data;
+    let lastError;
+
+    // Try each model until one succeeds
+    for (const model of models) {
+      try {
+        console.log(`Trying model: ${model}`);
+        
+        const response = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              contents: [
+                {
+                  parts: [{ text: prompt }],
+                },
+              ],
+              generationConfig: {
+                temperature: 0.7,
+                topK: 40,
+                topP: 0.95,
+                maxOutputTokens: 8192,
+                responseModalities: ["TEXT"],
+              },
+              systemInstruction: {
+                parts: [{ text: "Respond directly without extended reasoning. Analyze data and return JSON immediately." }]
+              }
+            }),
+          }
+        );
+
+        const responseData = await response.json();
+
+        if (!response.ok) {
+          const errorCode = responseData?.error?.code;
+          const errorStatus = responseData?.error?.status;
+          
+          console.error(`Model ${model} error:`, JSON.stringify(responseData, null, 2));
+          
+          // If overloaded (503) or unavailable, try next model
+          if (errorCode === 503 || errorStatus === "UNAVAILABLE") {
+            console.log(`Model ${model} is overloaded, trying next model...`);
+            lastError = responseData;
+            continue;
+          }
+          
+          // For other errors, throw immediately
+          throw new Error(`Gemini API failed: ${response.status} - ${JSON.stringify(responseData)}`);
+        }
+
+        // Success! Use this response
+        data = responseData;
+        console.log(`✅ Successfully got response from model: ${model}`);
+        break;
+        
+      } catch (error) {
+        console.error(`Error with model ${model}:`, error);
+        lastError = error;
+        // Try next model
+        continue;
+      }
     }
 
-    const data = await response.json();
+    // If all models failed, throw error
+    if (!data) {
+      console.error("All models failed. Last error:", lastError);
+      throw new Error(`All Gemini models are unavailable. Please try again later.`);
+    }
 
     // Log the full response for debugging
     console.log("Gemini response:", JSON.stringify(data, null, 2));
